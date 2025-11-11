@@ -1,0 +1,68 @@
+import customtkinter as ctk
+
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
+
+categories = []
+
+def generate_categories():
+    categories.clear()
+    output_box.delete("0.0", ctk.END)
+    
+    main = main_var.get().strip()
+    subs1 = sub1_var.get().strip().split(",")
+    subs2 = sub2_var.get().strip().split(",") if sub2_var.get().strip() else [""]
+
+    for s1 in subs1:
+        s1 = s1.strip()
+        for s2 in subs2:
+            s2 = s2.strip()
+            if s2:
+                line = f"{main} > {s1} > {s2}"
+            else:
+                line = f"{main} > {s1}"
+            categories.append(line)
+            output_box.insert(ctk.END, line + "\n")
+
+def copy_output():
+    app.clipboard_clear()
+    app.clipboard_append("\n".join(categories))
+    output_box.insert(ctk.END, "\nCopied to clipboard!\n")
+
+app = ctk.CTk()
+app.geometry("700x600")  # Increased window size
+app.title("Bulk Category Generator")
+
+# Main category: Men/Women
+main_var = ctk.StringVar(value="Men")
+main_label = ctk.CTkLabel(app, text="Main Category (Men/Women)")
+main_label.pack(pady=(10,0))
+main_entry = ctk.CTkEntry(app, textvariable=main_var, width=500, height=40, font=("Arial", 16))
+main_entry.pack(pady=5)
+
+# Subcategory 1 (comma-separated)
+sub1_var = ctk.StringVar()
+sub1_label = ctk.CTkLabel(app, text="Subcategory 1 (comma-separated)")
+sub1_label.pack(pady=(10,0))
+sub1_entry = ctk.CTkEntry(app, textvariable=sub1_var, width=500, height=40, font=("Arial", 16))
+sub1_entry.pack(pady=5)
+
+# Subcategory 2 (comma-separated, optional)
+sub2_var = ctk.StringVar()
+sub2_label = ctk.CTkLabel(app, text="Subcategory 2 (comma-separated, optional)")
+sub2_label.pack(pady=(10,0))
+sub2_entry = ctk.CTkEntry(app, textvariable=sub2_var, width=500, height=40, font=("Arial", 16))
+sub2_entry.pack(pady=5)
+
+# Buttons
+generate_btn = ctk.CTkButton(app, text="Generate Categories", command=generate_categories, width=200, height=50, font=("Arial", 14))
+generate_btn.pack(pady=10)
+
+copy_btn = ctk.CTkButton(app, text="Copy All Categories", command=copy_output, width=200, height=50, font=("Arial", 14))
+copy_btn.pack(pady=5)
+
+# Output box
+output_box = ctk.CTkTextbox(app, width=650, height=300, font=("Arial", 14))
+output_box.pack(pady=10)
+
+app.mainloop()
