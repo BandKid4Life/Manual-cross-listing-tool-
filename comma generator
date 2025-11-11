@@ -1,0 +1,46 @@
+import customtkinter as ctk
+
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
+
+def add_commas():
+    text = input_box.get("0.0", ctk.END).strip()
+    if not text:
+        output_box.delete("0.0", ctk.END)
+        return
+
+    # Split by lines and join with commas
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    output = ", ".join(lines)
+
+    output_box.delete("0.0", ctk.END)
+    output_box.insert(ctk.END, output)
+
+def copy_output():
+    app.clipboard_clear()
+    app.clipboard_append(output_box.get("0.0", ctk.END).strip())
+
+app = ctk.CTk()
+app.geometry("600x400")
+app.title("Automatic Comma Adder")
+
+# Input box
+input_label = ctk.CTkLabel(app, text="Enter each word/phrase on a new line:")
+input_label.pack(pady=(10,0))
+input_box = ctk.CTkTextbox(app, width=550, height=150, font=("Arial", 14))
+input_box.pack(pady=5)
+
+# Buttons
+process_btn = ctk.CTkButton(app, text="Add Commas", command=add_commas, width=200, height=40, font=("Arial", 14))
+process_btn.pack(pady=10)
+
+copy_btn = ctk.CTkButton(app, text="Copy Output", command=copy_output, width=200, height=40, font=("Arial", 14))
+copy_btn.pack(pady=5)
+
+# Output box
+output_label = ctk.CTkLabel(app, text="Comma-separated output:")
+output_label.pack(pady=(10,0))
+output_box = ctk.CTkTextbox(app, width=550, height=100, font=("Arial", 14))
+output_box.pack(pady=5)
+
+app.mainloop()
