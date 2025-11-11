@@ -1,0 +1,365 @@
+import os
+import sys
+import csv
+import tkinter as tk
+from tkinter import messagebox, filedialog
+
+# ============================================================
+# Helper: works in both .py and .exe
+# ============================================================
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and PyInstaller"""
+    try:
+        base_path = sys._MEIPASS  # when compiled
+    except Exception:
+        base_path = os.path.abspath(".")  # when running normally
+    return os.path.join(base_path, relative_path)
+
+
+# ============================================================
+# Searchable Dropdown
+# ============================================================
+class SearchableDropdown(tk.Frame):
+    """An Entry that shows a popup Listbox of matches."""
+    def __init__(self, master, values=None, width=40, placeholder="", **kwargs):
+        super().__init__(master, **kwargs)
+        self.values = values or []
+        self.var = tk.StringVar()
+        self.entry = tk.Entry(self, textvariable=self.var, width=width,
+                              fg="red", bg="blue", insertbackground="red")
+        self.entry.pack(fill="x")
+        self.entry.insert(0, placeholder)
+        self.entry.bind("<FocusIn>", self._on_focus_in)
+        self.entry.bind("<KeyRelease>", self._on_key)
+        self.popup = None
+
+    def _on_focus_in(self, e):
+        if self.entry.get().startswith("Type to search"):
+            self.entry.delete(0, tk.END)
+
+    def _on_key(self, e):
+        typed = self.var.get().strip().lower()
+        matches = [v for v in self.values if typed in v.lower()]
+        self._show_popup(matches)
+
+    def _show_popup(self, items):
+        if self.popup and self.popup.winfo_exists():
+            self.popup.destroy()
+        if not items:
+            return
+        x = self.entry.winfo_rootx()
+        y = self.entry.winfo_rooty() + self.entry.winfo_height()
+        self.popup = tk.Toplevel(self)
+        self.popup.overrideredirect(True)
+        self.popup.geometry(f"+{x}+{y}")
+        lb = tk.Listbox(self.popup, bg="blue", fg="red",
+                        selectbackground="red", selectforeground="black", width=60)
+        lb.pack()
+        for it in items:
+            lb.insert(tk.END, it)
+        lb.bind("<<ListboxSelect>>", lambda ev: self._on_select(lb))
+        lb.bind("<Escape>", lambda ev: self.popup.destroy())
+
+    def _on_select(self, lb):
+        try:
+            sel = lb.get(lb.curselection())
+        except Exception:
+            return
+        self.var.set(sel)
+        if self.popup and self.popup.winfo_exists():
+            self.popup.destroy()
+
+    def get(self):
+        return self.var.get().strip()
+
+    def set_values(self, new_values):
+        self.values = new_values or []
+        self.var.set("")
+
+
+# ============================================================
+# File Loaders
+# ============================================================
+def load_lines_strip(filename):
+    filename = resource_path(filename)
+    if not os.path.exists(filename):
+        return []
+    with open(filename, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def load_mercari_categories(filename="mercari_categories.txt.txt"):
+    return load_lines_strip(filename)
+
+
+def load_depop_categories(filename="depop1.txt"):
+    return load_lines_strip(filename)
+
+
+def load_depop_subcat_groups(filename="depop2.txt"):
+    lines = load_lines_strip(filename)
+    groups, current = [], []
+    for line in lines:
+        if line.strip().lower() == "other":
+            if current:
+                groups.append(current)
+                current = []
+        else:
+            current.append(line)
+    if current:
+        groups.append(current)
+    return groups
+
+
+# ============================================================
+# CSV helpers
+# ============================================================
+def ensure_csv_headers(filename, headers):
+    if not os.path.exists(filename):
+        with open(filename, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(headers)
+
+
+# ============================================================
+# Main Application
+# ============================================================
+class CrossListerApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Cross-Lister (Mercari / Depop / eBay)")
+        self.geometry("980x760")
+        self.configure(bg="black")
+
+        # Output folder (default current working directory)
+        self.output_folder = os.getcwd()
+
+        # Load data
+        self.mercari_categories = load_mercari_categories()
+        self.depop_cats = load_depop_categories()
+        self.depop_groups = load_depop_subcat_groups()
+
+        # Map Depop categories to all subcategories
+        groups_reversed = list(reversed(self.depop_groups))
+        self.depop_subcat_map = {
+            cat: groups_reversed[i] if i < len(groups_reversed) else []
+            for i, cat in enumerate(self.depop_cats)
+        }
+
+        # Platform selection
+        tk.Label(self, text="Resella Shi:", fg="red", bg="black", font=("Impact", 14, "bold")).pack(anchor="nw", padx=10, pady=(8, 0))
+        self.platform_var = tk.StringVar(value="Mercari")
+        platforms = ["Mercari", "Depop", "eBay"]
+        self.platform_menu = tk.OptionMenu(self, self.platform_var, *platforms, command=self.on_platform_change)
+        self.platform_menu.config(bg="blue", fg="white", activebackground="blue", highlightthickness=0)
+        self.platform_menu["menu"].config(bg="blue", fg="white")
+        self.platform_menu.pack(anchor="nw", padx=10, pady=(0, 6))
+
+        # Layout frames
+        self.content = tk.Frame(self, bg="black")
+        self.content.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Right: saved listings
+        right = tk.Frame(self.content, bg="black")
+        right.pack(side="right", fill="y", padx=(10, 0))
+        tk.Label(right, text="Saved Listings (session)", fg="red", bg="black").pack()
+        self.saved_listbox = tk.Listbox(right, width=48, height=34, fg="red", bg="black", selectbackground="red", selectforeground="black")
+        self.saved_listbox.pack(pady=5)
+
+        # Left: form
+        self.form = tk.Frame(self.content, bg="black")
+        self.form.pack(side="left", fill="both", expand=True)
+        self.build_form()
+        self.on_platform_change(self.platform_var.get())
+
+    # ----------------------------
+    # Build Form
+    # ----------------------------
+    def build_form(self):
+        for c in self.form.winfo_children():
+            c.destroy()
+
+        # Title
+        tk.Label(self.form, text="Title:", fg="red", bg="black").grid(row=0, column=0, sticky="w", padx=5, pady=6)
+        self.title_var = tk.StringVar()
+        tk.Entry(self.form, textvariable=self.title_var, width=70, fg="red", bg="blue", insertbackground="red").grid(row=0, column=1, sticky="w", padx=5, pady=6)
+
+        # Description
+        tk.Label(self.form, text="Description:", fg="red", bg="black").grid(row=1, column=0, sticky="nw", padx=5, pady=6)
+        self.desc_text = tk.Text(self.form, width=55, height=6, fg="red", bg="blue", insertbackground="red")
+        self.desc_text.grid(row=1, column=1, padx=5, pady=6, sticky="w")
+
+        # Category container
+        tk.Label(self.form, text="Category:", fg="red", bg="black").grid(row=2, column=0, sticky="w", padx=5, pady=6)
+        self.cat_container = tk.Frame(self.form, bg="black")
+        self.cat_container.grid(row=2, column=1, sticky="w", padx=5, pady=6)
+
+        # Item Type
+        tk.Label(self.form, text="Item Type (Top/Bottom):", fg="red", bg="black").grid(row=3, column=0, sticky="w", padx=5, pady=6)
+        self.item_type_var = tk.StringVar(value="Top")
+        self.item_type_menu = tk.OptionMenu(self.form, self.item_type_var, "Top", "Bottom", command=self.update_measurements)
+        self.item_type_menu.config(bg="blue", fg="red", activebackground="blue", highlightthickness=0)
+        self.item_type_menu["menu"].config(bg="blue", fg="red")
+        self.item_type_menu.grid(row=3, column=1, sticky="w", padx=5, pady=6)
+
+        # Measurements frame
+        self.meas_frame = tk.Frame(self.form, bg="black")
+        self.meas_frame.grid(row=4, column=0, columnspan=2, sticky="w", padx=5, pady=6)
+        self.build_measurements("Top")
+
+        # Brand / Price / Weight
+        self.add_entry("Brand:", "brand_var", 5)
+        self.add_entry("Price:", "price_var", 6, short=True)
+        self.add_weight_fields(7)
+
+        # Buttons
+        btn_frame = tk.Frame(self.form, bg="black")
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=10)
+        tk.Button(btn_frame, text="Save Listing", command=self.save_listing, fg="black", bg="red", font=("Arial", 11, "bold")).pack(side="left", padx=8)
+        tk.Button(btn_frame, text="Open CSV Folder", command=self.open_output_folder, fg="black", bg="red", font=("Arial", 11, "bold")).pack(side="left", padx=8)
+        tk.Button(btn_frame, text="Select Output Folder", command=self.select_output_folder, fg="black", bg="red", font=("Arial", 11, "bold")).pack(side="left", padx=8)
+
+    def add_entry(self, label, var_name, row, short=False):
+        setattr(self, var_name, tk.StringVar())
+        tk.Label(self.form, text=label, fg="red", bg="black").grid(row=row, column=0, sticky="w", padx=5, pady=6)
+        width = 20 if short else 40
+        tk.Entry(self.form, textvariable=getattr(self, var_name), width=width, fg="red", bg="blue", insertbackground="red").grid(row=row, column=1, sticky="w", padx=5, pady=6)
+
+    def add_weight_fields(self, row):
+        tk.Label(self.form, text="Weight (lbs):", fg="red", bg="black").grid(row=row, column=0, sticky="w", padx=5, pady=6)
+        self.wlbs_var = tk.StringVar()
+        tk.Entry(self.form, textvariable=self.wlbs_var, width=8, fg="red", bg="blue", insertbackground="red").grid(row=row, column=1, sticky="w", padx=5, pady=6)
+        tk.Label(self.form, text="Weight (oz):", fg="red", bg="black").grid(row=row, column=1, sticky="e", padx=(0, 120))
+        self.woz_var = tk.StringVar()
+        tk.Entry(self.form, textvariable=self.woz_var, width=8, fg="red", bg="blue", insertbackground="red").grid(row=row, column=1, sticky="e", padx=(0, 10), pady=6)
+
+    # ----------------------------
+    # Measurements
+    # ----------------------------
+    def build_measurements(self, item_type):
+        for c in self.meas_frame.winfo_children():
+            c.destroy()
+        if item_type == "Top":
+            fields = [("Length:", "length_var"), ("Pit to Pit:", "p2p_var"), ("Sleeve Inseam:", "sleeve_var")]
+        else:
+            fields = [("Width:", "width_var"), ("Inseam:", "inseam_var"), ("Rise:", "rise_var"), ("Leg Opening:", "leg_var")]
+
+        for i, (label, var) in enumerate(fields):
+            setattr(self, var, tk.StringVar())
+            tk.Label(self.meas_frame, text=label, fg="red", bg="black").grid(row=0, column=i*2, sticky="w", padx=2)
+            tk.Entry(self.meas_frame, textvariable=getattr(self, var), width=12, fg="red", bg="blue", insertbackground="red").grid(row=0, column=i*2+1, padx=4)
+
+    def update_measurements(self, item_type):
+        self.build_measurements(item_type)
+
+    # ----------------------------
+    # Categories
+    # ----------------------------
+    def build_category_widgets(self):
+        for w in self.cat_container.winfo_children():
+            w.destroy()
+        platform = self.platform_var.get()
+
+        if platform == "Mercari":
+            self.m_cat_widget = SearchableDropdown(self.cat_container, values=self.mercari_categories, width=70, placeholder="Type to search category")
+            self.m_cat_widget.pack(anchor="w")
+        elif platform == "Depop":
+            tk.Label(self.cat_container, text="Category:", fg="red", bg="black").pack(anchor="w")
+            cat_list = self.depop_cats or []
+            self.d_cat_widget = SearchableDropdown(self.cat_container, values=cat_list, width=70, placeholder="Type to search category")
+            self.d_cat_widget.pack(anchor="w")
+            tk.Label(self.cat_container, text="Subcategory:", fg="red", bg="black").pack(anchor="w")
+            # Flatten all subcategories
+            all_subs = [sub for group in self.depop_groups for sub in group]
+            self.d_sub_widget = SearchableDropdown(self.cat_container, values=all_subs, width=70, placeholder="Type to search subcategory")
+            self.d_sub_widget.pack(anchor="w")
+        else:
+            self.ebay_cat_entry = tk.Entry(self.cat_container, width=70, fg="red", bg="blue", insertbackground="red")
+            self.ebay_cat_entry.pack(anchor="w")
+
+    def on_platform_change(self, platform):
+        self.build_category_widgets()
+
+    # ----------------------------
+    # Collect Fields
+    # ----------------------------
+    def collect_fields(self):
+        title = self.title_var.get().strip()
+        desc = self.desc_text.get("1.0", tk.END).strip()
+        brand = self.brand_var.get().strip()
+        price = self.price_var.get().strip()
+        item_type = self.item_type_var.get()
+        if item_type == "Top":
+            meas = f"Length:{self.length_var.get()}|PitToPit:{self.p2p_var.get()}|Sleeve:{self.sleeve_var.get()}"
+        else:
+            meas = f"Width:{self.width_var.get()}|Inseam:{self.inseam_var.get()}|Rise:{self.rise_var.get()}|Leg:{self.leg_var.get()}"
+        return title, desc, brand, price, item_type, meas, self.wlbs_var.get(), self.woz_var.get()
+
+    # ----------------------------
+    # Save Listing
+    # ----------------------------
+    def save_listing(self):
+        platform = self.platform_var.get()
+        title, desc, brand, price, item_type, meas, wlbs, woz = self.collect_fields()
+
+        if platform == "Mercari":
+            cat = self.m_cat_widget.get()
+            filename = os.path.join(self.output_folder, "mercari_listings.csv")
+        elif platform == "Depop":
+            cat = self.d_cat_widget.get()
+            sub = self.d_sub_widget.get()
+            filename = os.path.join(self.output_folder, "depop_listings.csv")
+        else:
+            cat = self.ebay_cat_entry.get()
+            filename = os.path.join(self.output_folder, "ebay_listings.csv")
+
+        ensure_csv_headers(filename, ["Field", "Value"])
+
+        # Save vertically
+        with open(filename, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Title", title])
+            writer.writerow(["Category", cat])
+            if platform == "Depop":
+                writer.writerow(["Subcategory", sub])
+            writer.writerow(["Description", desc])
+            writer.writerow(["Brand", brand])
+            writer.writerow(["Price", price])
+            writer.writerow(["Item Type", item_type])
+            writer.writerow(["Measurements", meas])
+            writer.writerow(["Weight lbs", wlbs])
+            writer.writerow(["Weight oz", woz])
+            writer.writerow([])
+
+        # Update saved listbox
+        if platform == "Mercari":
+            self.saved_listbox.insert(tk.END, f"Mercari | {cat} | ${price}")
+        elif platform == "Depop":
+            self.saved_listbox.insert(tk.END, f"Depop | {cat} > {sub} | ${price}")
+        else:
+            self.saved_listbox.insert(tk.END, f"eBay | {title} | ${price}")
+
+        messagebox.showinfo("Saved", f"Listing saved for {platform}")
+
+    # ----------------------------
+    # Output Folder
+    # ----------------------------
+    def open_output_folder(self):
+        try:
+            if os.name == "nt":
+                os.startfile(self.output_folder)
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", self.output_folder])
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open folder: {e}")
+
+    def select_output_folder(self):
+        folder = filedialog.askdirectory(initialdir=self.output_folder)
+        if folder:
+            self.output_folder = folder
+            messagebox.showinfo("Folder Selected", f"Output folder set to:\n{self.output_folder}")
+
+
+if __name__ == "__main__":
+    app = CrossListerApp()
+    app.mainloop()
