@@ -1,0 +1,99 @@
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from PIL import Image, ExifTags
+
+# Rotate image based on EXIF
+def rotate_image(image):
+    try:
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = image._getexif()
+        if exif is not None:
+            orientation_value = exif.get(orientation, None)
+            if orientation_value == 3:
+                image = image.rotate(180, expand=True)
+            elif orientation_value == 6:
+                image = image.rotate(270, expand=True)
+            elif orientation_value == 8:
+                image = image.rotate(90, expand=True)
+    except:
+        pass
+    return image
+
+class ImageRotatorApp:
+    def __init__(self, root):
+        self.root = root
+        root.title("Multiple Image Rotator")
+        root.geometry("700x600")
+        root.configure(bg="black")  # Set background to black
+
+        self.images = []  # List of file paths
+
+        # Base name entry
+        tk.Label(root, text="Base name for saved files:", fg="red", bg="black", font=("Arial", 12, "bold")).pack(pady=5)
+        self.entry_name = tk.Entry(root, width=30, fg="red", bg="black", insertbackground="red", font=("Arial", 12))
+        self.entry_name.pack(pady=5)
+
+        # Listbox for showing selected files
+        self.listbox = tk.Listbox(root, width=80, height=20, fg="red", bg="black", selectbackground="red", selectforeground="black")
+        self.listbox.pack(pady=10)
+
+        # Buttons
+        self.select_btn = tk.Button(root, text="Select Images", command=self.select_images, fg="black", bg="red", font=("Arial", 12, "bold"))
+        self.select_btn.pack(pady=5)
+        self.process_btn = tk.Button(root, text="Select Output Folder and Process", command=self.process_images, fg="black", bg="red", font=("Arial", 12, "bold"))
+        self.process_btn.pack(pady=20)
+
+        # Progress bar
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("red.Horizontal.TProgressbar", troughcolor='black', background='red', thickness=20)
+        self.progress = ttk.Progressbar(root, orient="horizontal", length=650, mode="determinate", style="red.Horizontal.TProgressbar")
+        self.progress.pack(pady=10)
+
+    def select_images(self):
+        files = filedialog.askopenfilenames(
+            title="Select Images",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png")]
+        )
+        for f in files:
+            if f not in self.images:
+                self.images.append(f)
+                self.listbox.insert(tk.END, os.path.basename(f))
+
+    def process_images(self):
+        if not self.images:
+            messagebox.showwarning("No images", "Please select images first!")
+            return
+
+        output_folder = filedialog.askdirectory(title="Select Output Folder")
+        if not output_folder:
+            return
+
+        base_name = self.entry_name.get().strip()
+        if base_name == "":
+            base_name = "image"
+
+        self.progress["maximum"] = len(self.images)
+        self.progress["value"] = 0
+
+        for i, path in enumerate(self.images, start=1):
+            try:
+                img = Image.open(path)
+                img = rotate_image(img)
+                filename = f"{base_name}_{i}.jpg"
+                save_path = os.path.join(output_folder, filename)
+                img.save(save_path)
+            except Exception as e:
+                print(f"Failed to process {path}: {e}")
+            self.progress["value"] += 1
+            self.root.update_idletasks()
+
+        messagebox.showinfo("Done", f"{len(self.images)} images processed and saved!")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImageRotatorApp(root)
+    root.mainloop()
